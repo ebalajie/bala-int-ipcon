@@ -1,43 +1,33 @@
-# ---- builder ----
+# ---- Stage 1: Builder ----
 FROM python:3.12-slim AS builder
 
-# Prevent Python from writing .pyc files
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-
 WORKDIR /app
 
-# Install build dependencies
+# Copy dependency file
 COPY requirements.txt .
-RUN apt-get update && apt-get install -y --no-install-recommends gcc build-essential \
-    && pip install --user --no-cache-dir -r requirements.txt \
-    && apt-get purge -y --auto-remove gcc build-essential \
-    && rm -rf /var/lib/apt/lists/*
 
-# Copy source
-COPY . .
+# Install dependencies into /app/deps
+RUN pip install --prefix=/app/deps -r requirements.txt
 
-# ---- final ----
-FROM python:3.12-alpine
+# ---- Stage 2: Final Image ----
+FROM python:3.12-slim
 
-# Create a non-root user
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+# Create non-root user
+RUN useradd -m appuser
 
 WORKDIR /app
 
-# Copy installed packages from builder (user-site)
-COPY --from=builder /root/.local /root/.local
-ENV PATH=/root/.local/bin:$PATH
+# Copy installed dependencies
+COPY --from=builder /app/deps /usr/local
 
-# Copy app code
-COPY --from=builder /app /app
+# Copy application code
+COPY main.py .
 
-# Filesystem & permissions
-RUN chown -R appuser:appgroup /app
-
-EXPOSE 8000
-
+# Switch to non-root user
 USER appuser
 
-# Use a small worker count; Uvicorn defaults are fine for proof-of-concept
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--loop", "auto"]
+# Expose app port
+EXPOSE 8000
+
+# Start FastAPI app
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
