@@ -1,0 +1,83 @@
+name: ipconfig-multi-branch-ci-cd
+
+on:
+  push:
+    branches:
+      - bala-dev
+      - helm-int-ip
+
+env:
+  DOCKERHUB_REPOSITORY: balaji541/bala-int-ipcon
+  AWS_REGION: ap-southeast-1
+  EKS_CLUSTER: my-cluster-temp
+  NAMESPACE: ipconfig
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build_and_push:
+    name: Build and Push Docker Image
+    runs-on: temprun-bala
+    if: github.ref == 'refs/heads/bala-dev'
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies & run tests
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+          pytest -v
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build Docker image
+        run: |
+          docker build -t $DOCKERHUB_REPOSITORY:${{ github.sha }} .
+          docker tag  $DOCKERHUB_REPOSITORY:${{ github.sha }} $DOCKERHUB_REPOSITORY:latest
+
+      - name: Push Docker image
+        run: |
+          docker push $DOCKERHUB_REPOSITORY:${{ github.sha }}
+          docker push $DOCKERHUB_REPOSITORY:latest
+
+  helm_deploy:
+    name: Deploy Helm Chart to EKS
+    runs-on: temprun-bala
+    if: github.ref == 'refs/heads/helm-int-ip'
+    needs: []
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --region ap-southeast-1 --name my-cluster-temp
+
+      - name: Helm Lint
+        run: helm lint helm-int-ip/
+
+      - name: Deploy with Helm
+        run: |
+          helm upgrade --install ipconfig-service helm-int-ip/ \
+              --namespace $NAMESPACE \
+              --create-namespace \
+              --set image.repository=$DOCKERHUB_REPOSITORY \
+              --set image.tag=latest
+
+      - name: Run Helm test
+        run: |
+          helm test ipconfig-service -n $NAMESPACE || true
