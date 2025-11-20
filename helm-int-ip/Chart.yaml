@@ -1,0 +1,5 @@
+apiVersion: v2
+name: ipconfig-service
+description: Helm chart for IP Config FastAPI service
+version: 0.1.0
+appVersion: "1.0"
